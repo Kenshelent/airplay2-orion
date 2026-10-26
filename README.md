@@ -61,6 +61,32 @@ adb shell /data/shairport/airplay.sh start
 
 Проверка: `airplay.sh status` — процесс `shairport-sync-ap2`, слушает `:7000`. В Пункте управления iPhone — **Я.Станция 3**.
 
+## YAM (Y Application Manager)
+
+Сайт https://yam.prismexec.tech/ ставит `yamd` и показывает каталог Yapkg. Загрузить пакет через сайт нельзя: каталог собирается из [nyakokitsu/yapkg](https://github.com/nyakokitsu/yapkg).
+
+Готовый `.yap` (binary service, aarch64): [airplay2-orion-1.0.0.yap](https://github.com/Kenshelent/airplay2-orion/releases/download/v1.0.0/airplay2-orion-1.0.0.yap). В Web UI YAM включите «Разрешить бинарники плагинов».
+
+Реестр этого репозитория:
+
+```
+https://raw.githubusercontent.com/Kenshelent/airplay2-orion/main/yam-registry/index.json
+```
+
+```sh
+# с компьютера, где есть CLI yam и ADB/SSH к колонке
+yam install --registry https://raw.githubusercontent.com/Kenshelent/airplay2-orion/main/yam-registry/index.json airplay2-orion
+yam service enable airplay2-orion
+
+# или скачать архив и поставить локально
+yam install ./airplay2-orion-1.0.0.yap
+yam service enable airplay2-orion
+```
+
+То же через переменную: `YAM_REGISTRY_URL=<url index.json> yam install airplay2-orion`.
+
+Чтобы пакет попал в общий каталог на yam.prismexec.tech, нужен pull request в ветку `packages` у yapkg.
+
 ## Лицензии
 
 shairport-sync — GPL-3.0, nqptp — GPL-2.0, avahi — LGPL-2.1+. Тексты в `LICENSES/`.

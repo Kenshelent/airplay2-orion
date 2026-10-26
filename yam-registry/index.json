@@ -1,0 +1,13 @@
+{
+  "format": 2,
+  "packages": [
+    {
+      "id": "airplay2-orion",
+      "version": "1.0.0",
+      "name": "AirPlay 2 (Станция 3)",
+      "description": "AirPlay 2 для Яндекс Станции 3 (Orion). Алиса остаётся включённой.",
+      "sha256": "c267aafd43d215d1ad3c2c069bfe2d994faaf1f59e37195d1c3f641e5db99a4f",
+      "url": "https://github.com/Kenshelent/airplay2-orion/releases/download/v1.0.0/airplay2-orion-1.0.0.yap"
+    }
+  ]
+}

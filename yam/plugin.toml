@@ -1,0 +1,16 @@
+id = "airplay2-orion"
+name = "AirPlay 2 (Станция 3)"
+version = "1.0.0"
+entry = "launch.sh"
+description = "AirPlay 2 для Яндекс Станции 3 (Orion): приёмник Apple Music / iPhone / Mac, Алиса остаётся включённой."
+permissions = ["exec"]
+
+[launch]
+kind = "binary"
+mode = "service"
+path = "launch.sh"
+interpreter = "sh"
+library_paths = ["ap2/libs"]
+
+[compatibility]
+features = ["arch.aarch64"]
