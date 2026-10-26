@@ -1,0 +1,16 @@
+Third-party components shipped in payload.tar (all unmodified unless noted)
+============================================================================
+shairport-sync 4.3.7  (GPL-3.0, with MIT-licensed portions)  https://github.com/mikebrady/shairport-sync
+    MODIFIED: see src/shairport-sync-4.3.7-*.patch (HomePod model id in the Bonjour records, event-channel
+    remote control for next/previous/play/pause, keeping the pair-verify secret for that channel)
+nqptp 1.2.4           (GPL-2.0)               https://github.com/mikebrady/nqptp
+avahi-daemon 0.7      (LGPL-2.1+)             Debian buster package, binary taken as is
+libs/                 libav*/libsw*, libssl/libcrypto, libsodium, libplist, libgcrypt, libsoxr, libconfig,
+                      libpopt, libstdc++ and their dependencies, from Debian 10 "buster" armhf (each under
+                      its own licence: LGPL/GPL/BSD/OpenSSL; sources via `apt source <package>` or
+                      https://archive.debian.org/debian/)
+airplayd              (GPL-3.0, same as shairport-sync) source: src/airplayd.c
+
+The licence texts are in LICENSES/. Mini 3 payload was Debian buster armhf. This Orion rebuild is
+Debian bookworm aarch64 (glibc 2.36): same shairport-sync 4.3.7 patches + nqptp 1.2.4 + avahi, with
+airplayd.c rewritten for the 36-LED Orion ring. Configure flags match upstream AirPlay 2.

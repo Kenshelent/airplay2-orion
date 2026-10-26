@@ -1,0 +1,261 @@
+--- /opt/src/shairport-sync/rtp.c	2026-10-23 03:23:34.191724100 +0300
++++ /opt/buster/root/src/shairport-sync/rtp.c	2026-10-23 04:25:27.703583817 +0300
+@@ -44,6 +44,8 @@
+ #include <sys/types.h>
+ #include <time.h>
+ #include <unistd.h>
++#include <poll.h>
++#include <uuid/uuid.h>
+ #ifdef CONFIG_AIRPLAY_2
+ #include "ptp-utilities.h"
+ #include <libavcodec/avcodec.h>
+@@ -1564,6 +1566,101 @@
+   debug(2, "Connection %d: AP2 Event Receiver Cleanup.", conn->connection_number);
+ }
+ 
++
++#define SPS_CMD_UDP_PORT 7001
++
++static void *sps_keyed_archive(const char *gid, uint32_t *len) {
++  plist_t root = plist_new_dict();
++  plist_dict_set_item(root, "$version", plist_new_uint(100000));
++  plist_dict_set_item(root, "$archiver", plist_new_string("NSKeyedArchiver"));
++  plist_t top = plist_new_dict();
++  plist_dict_set_item(top, "root", plist_new_uid(1));
++  plist_dict_set_item(root, "$top", top);
++  plist_t objs = plist_new_array();
++  plist_array_append_item(objs, plist_new_string("$null"));
++  plist_t o1 = plist_new_dict();
++  plist_t nso = plist_new_array();
++  plist_array_append_item(nso, plist_new_uid(2));
++  plist_dict_set_item(o1, "NS.objects", nso);
++  plist_dict_set_item(o1, "$class", plist_new_uid(3));
++  plist_array_append_item(objs, o1);
++  plist_array_append_item(objs, plist_new_string(gid));
++  plist_t o3 = plist_new_dict();
++  plist_dict_set_item(o3, "$classname", plist_new_string("NSMutableArray"));
++  plist_t cls = plist_new_array();
++  plist_array_append_item(cls, plist_new_string("NSMutableArray"));
++  plist_array_append_item(cls, plist_new_string("NSArray"));
++  plist_array_append_item(cls, plist_new_string("NSObject"));
++  plist_dict_set_item(o3, "$classes", cls);
++  plist_array_append_item(objs, o3);
++  plist_dict_set_item(root, "$objects", objs);
++  char *bin = NULL;
++  plist_to_bin(root, &bin, len);
++  plist_free(root);
++  return bin;
++}
++
++// the receiver controls the phone through the event channel ("POST /command", MediaRemote command)
++static int sps_send_event_request(int fd, struct pair_cipher_context *cc, const uint8_t *msg, size_t len) {
++  uint8_t *enc = NULL;
++  size_t enc_len = 0;
++  if (pair_encrypt(&enc, &enc_len, msg, len, cc) < 0)
++    return -1;
++  int r = (send(fd, enc, enc_len, MSG_NOSIGNAL) == (ssize_t)enc_len) ? 0 : -1;
++  free(enc);
++  return r;
++}
++
++static int sps_send_command(rtsp_conn_info *conn, int fd, struct pair_cipher_context *cc, const char *name,
++                            int *cseq) {
++  static const struct { const char *name; const char *mr; } cmds[] = {
++      {"play", "0"}, {"pause", "1"}, {"playpause", "2"}, {"next", "4"}, {"previous", "5"}};
++  const char *mr = NULL;
++  for (unsigned i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++)
++    if (strcmp(name, cmds[i].name) == 0)
++      mr = cmds[i].mr;
++  if (!mr)
++    return -1;
++  const char *gid = conn->airplay_gid ? conn->airplay_gid : config.airplay_pi;
++  uint32_t alen = 0;
++  char *archive = sps_keyed_archive(gid, &alen);
++  uuid_t u;
++  char us[40];
++  uuid_generate_random(u);
++  uuid_unparse_upper(u, us);
++
++  plist_t params = plist_new_dict();
++  plist_dict_set_item(params, "kMRMediaRemoteOptionSendOptionsNumber", plist_new_uint(0));
++  plist_dict_set_item(params, "kMRMediaRemoteOptionCommandID", plist_new_string(us));
++  plist_dict_set_item(params, "kMRMediaRemoteOptionIsRedirectingCommand", plist_new_bool(1));
++  plist_dict_set_item(params, "kMRMediaRemoteOptionDestinationDeviceUIDs", plist_new_data(archive, alen));
++  plist_t top = plist_new_dict();
++  plist_dict_set_item(top, "modernMediaRemoteCommand", plist_new_string(mr));
++  plist_dict_set_item(top, "type", plist_new_string("sendMediaRemoteCommand"));
++  plist_dict_set_item(top, "params", params);
++  char *body = NULL;
++  uint32_t blen = 0;
++  plist_to_bin(top, &body, &blen);
++  plist_free(top);
++  free(archive);
++
++  *cseq = (*cseq >= 99) ? 10 : *cseq + 1;
++  char head[200];
++  int hl = snprintf(head, sizeof(head),
++                    "POST /command RTSP/1.0\r\nContent-Length: %u\r\n"
++                    "Content-Type: application/x-apple-binary-plist\r\nCSeq: %d\r\n\r\n",
++                    blen, *cseq);
++  uint8_t *msg = malloc(hl + blen);
++  memcpy(msg, head, hl);
++  memcpy(msg + hl, body, blen);
++  free(body);
++  int r = sps_send_event_request(fd, cc, msg, hl + blen);
++  free(msg);
++  debug(1, "Connection %d: event channel command \"%s\" (MR %s, group \"%s\") sent: %d",
++        conn->connection_number, name, mr, gid, r);
++  return r;
++}
++
+ void *rtp_event_receiver(void *arg) {
+   rtsp_conn_info *conn = (rtsp_conn_info *)arg;
+   if (conn->airplay_stream_category == remote_control_stream)
+@@ -1572,59 +1669,109 @@
+     debug(2, "Connection %d: AP2 Event Receiver started", conn->connection_number);
+   pthread_cleanup_push(rtp_event_receiver_cleanup_handler, arg);
+ 
+-  // listen(conn->event_socket, 5); // this is now done in the handle_setup_2 code
+-
+-  uint8_t packet[4096];
+-  ssize_t nread;
+   SOCKADDR remote_addr;
+   memset(&remote_addr, 0, sizeof(remote_addr));
+   socklen_t addr_size = sizeof(remote_addr);
+ 
+   int fd = accept(conn->event_socket, (struct sockaddr *)&remote_addr, &addr_size);
+-  debug(2,
+-        "Connection %d: rtp_event_receiver accepted a connection on socket %d and moved to a new "
+-        "socket %d.",
+-        conn->connection_number, conn->event_socket, fd);
++  debug(1, "Connection %d: event channel: phone connected (socket %d).", conn->connection_number, fd);
+   intptr_t pfd = fd;
+   pthread_cleanup_push(socket_cleanup, (void *)pfd);
+-  int finished = 0;
+-  do {
+-    nread = recv(fd, packet, sizeof(packet), 0);
+ 
+-    if (nread < 0) {
+-      char errorstring[1024];
+-      strerror_r(errno, (char *)errorstring, sizeof(errorstring));
+-      debug(1,
+-            "Connection %d: error in ap2 rtp_event_receiver %d: \"%s\". Could not recv a packet.",
+-            conn->connection_number, errno, errorstring);
+-      // if ((config.diagnostic_drop_packet_fraction == 0.0) ||
+-      //     (drand48() > config.diagnostic_drop_packet_fraction)) {
+-    } else if (nread > 0) {
++  struct pair_cipher_context *cc = NULL;
++  if (conn->ap2_pairing_context.shared_secret_len > 0)
++    cc = pair_cipher_new(PAIR_SERVER_HOMEKIT, 3, conn->ap2_pairing_context.shared_secret,
++                         conn->ap2_pairing_context.shared_secret_len);
++  if (!cc)
++    debug(1, "Connection %d: event channel: could not set up ciphering.", conn->connection_number);
++
++  // local control: "next" / "previous" / "play" / "pause" / "playpause" as a UDP datagram to 127.0.0.1:7001
++  int cmd_fd = socket(AF_INET, SOCK_DGRAM, 0);
++  if (cmd_fd >= 0) {
++    int one = 1;
++    setsockopt(cmd_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
++    struct sockaddr_in la;
++    memset(&la, 0, sizeof(la));
++    la.sin_family = AF_INET;
++    la.sin_port = htons(SPS_CMD_UDP_PORT);
++    la.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
++    if (bind(cmd_fd, (struct sockaddr *)&la, sizeof(la)) != 0) {
++      close(cmd_fd);
++      cmd_fd = -1;
++    }
++  }
++  intptr_t pcmd = cmd_fd;
++  pthread_cleanup_push(socket_cleanup, (void *)pcmd);
+ 
+-      // ssize_t plen = nread;
+-      debug(1, "Connection %d: Packet Received on Event Port.", conn->connection_number);
+-      if (packet[1] == 0xD7) {
+-        debug(1,
+-              "Connection %d: AP2 Event Receiver -- Time Announce RTP packet of type 0x%02X length "
+-              "%d received.",
+-              conn->connection_number, packet[1], nread);
++  FILE *st = fopen("/tmp/sps-event", "w");
++  if (st) { fputs("1\n", st); fclose(st); }
++
++  uint8_t raw[4096];
++  size_t rawlen = 0;
++  int cseq = 9;
++  int finished = 0;
++  do {
++    struct pollfd pf[2];
++    pf[0].fd = fd; pf[0].events = POLLIN;
++    pf[1].fd = cmd_fd; pf[1].events = POLLIN;
++    int pr = poll(pf, cmd_fd >= 0 ? 2 : 1, -1);
++    if (pr < 0) {
++      if (errno == EINTR) continue;
++      break;
++    }
++    if (cmd_fd >= 0 && (pf[1].revents & POLLIN)) {
++      char c[64];
++      ssize_t n = recv(cmd_fd, c, sizeof(c) - 1, 0);
++      if (n > 0) {
++        while (n > 0 && (c[n - 1] == '\n' || c[n - 1] == '\r')) n--;
++        c[n] = 0;
++        if (cc) sps_send_command(conn, fd, cc, c, &cseq);
++      }
++    }
++    if (pf[0].revents & (POLLIN | POLLHUP | POLLERR)) {
++      ssize_t nread = recv(fd, raw + rawlen, sizeof(raw) - rawlen, 0);
++      if (nread <= 0) {
++        finished = 1;
++      } else if (cc) {
++        rawlen += nread;
++        uint8_t *plain = NULL;
++        size_t plain_len = 0;
++        ssize_t used = pair_decrypt(&plain, &plain_len, raw, rawlen, cc);
++        if (used > 0) {
++          memmove(raw, raw + used, rawlen - used);
++          rawlen -= used;
++          if (plain_len > 0) {
++            plain[plain_len - 1] = plain[plain_len - 1]; // keep as is
++            char *txt = malloc(plain_len + 1);
++            memcpy(txt, plain, plain_len);
++            txt[plain_len] = 0;
++            debug(2, "Connection %d: event channel message from phone, %u bytes: %.60s",
++                  conn->connection_number, (unsigned)plain_len, txt);
++            if (strncmp(txt, "RTSP/", 5) != 0 && strncmp(txt, "HTTP/", 5) != 0) {
++              const char *cs = strstr(txt, "CSeq:");
++              char rep[120];
++              int rl = snprintf(rep, sizeof(rep), "RTSP/1.0 200 OK\r\nContent-Length: 0\r\nCSeq: %d\r\n\r\n",
++                                cs ? atoi(cs + 5) : 0);
++              sps_send_event_request(fd, cc, (uint8_t *)rep, rl);
++            }
++            free(txt);
++          }
++          free(plain);
++        } else if (used < 0) {
++          rawlen = 0; // undecodable: drop it
++        }
+       } else {
+-        debug(1,
+-              "Connection %d: AP2 Event Receiver -- Unknown RTP packet of type 0x%02X length %d "
+-              "received.",
+-              conn->connection_number, packet[1], nread);
++        rawlen = 0;
+       }
+-      // } else {
+-      //   debug(3, "Event Receiver Thread -- dropping incoming packet to simulate a bad network.");
+-      // }
+-    } else {
+-      finished = 1;
+     }
+   } while (finished == 0);
++  st = fopen("/tmp/sps-event", "w");
++  if (st) { fputs("0\n", st); fclose(st); }
++  if (cc) pair_cipher_free(cc);
++  pthread_cleanup_pop(1); // command socket
+   pthread_cleanup_pop(1); // close the socket
+   pthread_cleanup_pop(1); // do the cleanup
+-  debug(2, "Connection %d: AP2 Event Receiver RTP thread \"normal\" exit.",
+-        conn->connection_number);
++  debug(1, "Connection %d: event channel closed.", conn->connection_number);
+   pthread_exit(NULL);
+ }
+ 

@@ -1,0 +1,69 @@
+--- /opt/src/shairport-sync/rtsp.c	2026-10-23 03:23:34.191724100 +0300
++++ /opt/buster/root/src/shairport-sync/rtsp.c	2026-10-23 04:25:27.698560592 +0300
+@@ -282,7 +282,7 @@
+   else
+     txt_records[entry_number++] = "md=0,1,2";
+ #endif
+-  txt_records[entry_number++] = "am=Shairport Sync";
++  txt_records[entry_number++] = "am=AudioAccessory5,1";
+   txt_records[entry_number++] = "sf=0x4";
+   txt_records[entry_number++] = "tp=UDP";
+   txt_records[entry_number++] = "vn=65537";
+@@ -338,7 +338,7 @@
+   secondary_txt_records[entry_number++] = "acl=0";
+   secondary_txt_records[entry_number++] = "rsf=0x0";
+   secondary_txt_records[entry_number++] = firmware_version;
+-  secondary_txt_records[entry_number++] = "model=Shairport Sync";
++  secondary_txt_records[entry_number++] = "model=AudioAccessory5,1";
+   snprintf(piString, sizeof(piString), "pi=%s", config.airplay_pi);
+   secondary_txt_records[entry_number++] = piString;
+   if ((conn != NULL) && (conn->airplay_gid != 0)) {
+@@ -1749,7 +1749,7 @@
+       if (add_pstring_to_malloc("flags=0x4", &qualifier_response_data,
+                                 &qualifier_response_data_length) == 0)
+         debug(1, "Problem");
+-      if (add_pstring_to_malloc("model=Shairport Sync", &qualifier_response_data,
++      if (add_pstring_to_malloc("model=AudioAccessory5,1", &qualifier_response_data,
+                                 &qualifier_response_data_length) == 0)
+         debug(1, "Problem");
+       if (add_pstring_to_malloc("manufacturer=", &qualifier_response_data,
+@@ -1792,7 +1792,7 @@
+       plist_dict_set_item(response_plist, "name", plist_new_string(config.service_name));
+       char *vs = get_version_string();
+       //      plist_dict_set_item(response_plist, "model", plist_new_string(vs));
+-      plist_dict_set_item(response_plist, "model", plist_new_string("Shairport Sync"));
++      plist_dict_set_item(response_plist, "model", plist_new_string("AudioAccessory5,1"));
+       free(vs);
+       // pkString_make(pkString, sizeof(pkString), config.airplay_device_id);
+       // plist_dict_set_item(response_plist, "pk", plist_new_string(pkString));
+@@ -1822,7 +1822,7 @@
+     plist_dict_set_item(response_plist, "name", plist_new_string(config.service_name));
+     char *vs = get_version_string();
+     // plist_dict_set_item(response_plist, "model", plist_new_string(vs));
+-    plist_dict_set_item(response_plist, "model", plist_new_string("Shairport Sync"));
++    plist_dict_set_item(response_plist, "model", plist_new_string("AudioAccessory5,1"));
+     free(vs);
+     // pkString_make(pkString, sizeof(pkString), config.airplay_device_id);
+     // plist_dict_set_item(response_plist, "pk", plist_new_string(pkString));
+@@ -2241,6 +2241,10 @@
+       debug(1, "Error setting up rtsp control channel ciphering\n");
+       goto out;
+     }
++    if (result->shared_secret_len <= sizeof(conn->ap2_pairing_context.shared_secret)) {
++      memcpy(conn->ap2_pairing_context.shared_secret, result->shared_secret, result->shared_secret_len);
++      conn->ap2_pairing_context.shared_secret_len = result->shared_secret_len;
++    }
+   }
+ 
+ out:
+@@ -2287,6 +2291,10 @@
+       debug(1, "Error setting up rtsp control channel ciphering\n");
+       goto out;
+     }
++    if (result->shared_secret_len <= sizeof(conn->ap2_pairing_context.shared_secret)) {
++      memcpy(conn->ap2_pairing_context.shared_secret, result->shared_secret, result->shared_secret_len);
++      conn->ap2_pairing_context.shared_secret_len = result->shared_secret_len;
++    }
+   }
+ 
+ out:

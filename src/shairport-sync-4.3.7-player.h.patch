@@ -1,0 +1,11 @@
+--- /opt/src/shairport-sync/player.h	2026-10-23 03:23:34.191724100 +0300
++++ /opt/buster/root/src/shairport-sync/player.h	2026-10-23 04:25:27.697667373 +0300
+@@ -132,6 +132,8 @@
+   struct pair_setup_context *setup_ctx;
+   struct pair_verify_context *verify_ctx;
+   pair_cipher_bundle control_cipher_bundle;
++  uint8_t shared_secret[64];
++  size_t shared_secret_len;
+ } ap2_pairing;
+ 
+ // flush requests are stored in order of flushFromSeq
